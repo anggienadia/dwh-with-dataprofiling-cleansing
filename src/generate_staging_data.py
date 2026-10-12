@@ -4,8 +4,8 @@ import random
 
 def generate_dirty_dataset():
     print("Membaca dataset referensi asli...")
-    orders = pd.read_csv('orders.csv')
-    order_items = pd.read_csv('order_items.csv')
+    orders = pd.read_csv('data/raw/orders.csv')
+    order_items = pd.read_csv('data/raw/order_items.csv')
     
     # Menggabungkan order_items dan orders sebagai tabel fakta utama
     df_base = pd.merge(order_items, orders, on='order_id', how='left')
