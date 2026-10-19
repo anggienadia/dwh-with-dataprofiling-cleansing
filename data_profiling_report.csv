@@ -1,0 +1,39 @@
+level,objek,teknik,temuan,jumlah_baris,persen
+1-Element,customer_id,Kelengkapan,nilai kosong,50232,5.00%
+1-Element,shipped_date,Kelengkapan,nilai kosong,123324,12.27%
+1-Element,customer_id,Tipe data,"tersimpan desimal ('218.0'), seharusnya INT",954768,95.00%
+1-Element,order_date,Pola,"format bukan YYYY-MM-DD (dd/mm/yyyy, yyyy/mm/dd, dd-mm-yyyy)",50255,5.00%
+1-Element,quantity,Domain (vs order_items),"nilai di luar domain OLTP ['1', '2']",10055,1.00%
+1-Element,discount,Domain (vs order_items),"nilai di luar domain OLTP ['0.05', '0.07', '0.1', '0.2']",5018,0.50%
+1-Element,order_status,Domain (vs orders),"nilai di luar domain OLTP ['1', '2', '3', '4']",0,0.00%
+1-Element,list_price,Statistik,bernilai 0 (harusnya > 0),5023,0.50%
+2-Record,shipped_date,Dependency (tgl),tanggal kirim < tanggal pesan,20113,2.00%
+2-Record,shipped_date,Sentinel value,berisi 2000-01-01 (nilai default/dummy),20113,2.00%
+2-Record,required_date,Dependency (tgl),tanggal dibutuhkan < tanggal pesan,0,0.00%
+2-Record,order_status+shipped_date,Dependency,status 4 (selesai) tapi shipped_date kosong,17582,1.75%
+2-Record,order_status+shipped_date,Dependency,status 1-3 tapi shipped_date terisi,2225,0.22%
+2-Record,product_id -> list_price,Dependency (vs products),list_price != harga master produk,5023,0.50%
+2-Record,staff_id -> store_id,Dependency (vs staffs),store_id != store tempat staff bertugas,0,0.00%
+2-Record,order_id -> customer_id,Dependency (vs orders),customer_id != nilai di orders,0,0.00%
+2-Record,order_id -> store_id,Dependency (vs orders),store_id != nilai di orders,0,0.00%
+2-Record,order_id -> staff_id,Dependency (vs orders),staff_id != nilai di orders,0,0.00%
+2-Record,order_id -> order_status,Dependency (vs orders),order_status != nilai di orders,0,0.00%
+2-Record,order_id -> required_date,Dependency (vs orders),required_date != nilai di orders,0,0.00%
+2-Record,order_id -> order_date,Dependency (vs orders),tanggal pesan (setelah parse) != orders,0,0.00%
+2-Record,shipped_date vs required_date,INFO (bukan error),kirim melewati tanggal dibutuhkan; di OLTP juga ada (458 dari 1615 order),276485,27.51%
+3-Set,(semua kolom),Duplikasi,baris duplikat persis,955438,95.07%
+3-Set,"(order_id,item_id)",Duplikasi,baris berlebih; hanya 4722 kunci unik = jumlah baris order_items OLTP (4722),1000278,99.53%
+3-Set,customer_id -> customers,Integritas Referensial,customer_id (terisi) tidak ada di master,0,0.00%
+3-Set,product_id -> products,Integritas Referensial,product_id tidak ada di master,0,0.00%
+3-Set,staff_id -> staffs,Integritas Referensial,staff_id tidak ada di master,0,0.00%
+3-Set,store_id -> stores,Integritas Referensial,store_id tidak ada di master,0,0.00%
+3-Set,"(order_id,item_id) -> order_items",Integritas Referensial,kunci tidak ada di OLTP,0,0.00%
+3-Set,order_items -> staging,Kelengkapan/cakupan,baris OLTP yang tidak ada di staging,0,0.00%
+0-Baseline OLTP,customers.phone,Kelengkapan,teks literal 'NULL' (bukan NULL sebenarnya),1267,87.68%
+0-Baseline OLTP,orders.shipped_date,Kelengkapan,teks literal 'NULL' (semua status 1-3),170,10.53%
+0-Baseline OLTP,staffs.manager_id,Kelengkapan,teks literal 'NULL' (staff paling atas),1,10.00%
+0-Baseline OLTP,customers.street,Pola,spasi di ujung teks,1445,100.00%
+0-Baseline OLTP,products,Kelengkapan/cakupan,produk tanpa baris stok di stocks,8,2.49%
+0-Baseline OLTP,products,Kelengkapan/cakupan,produk yang tidak pernah dipesan,14,4.36%
+0-Baseline OLTP,order_items.product_id,Integritas Referensial,tidak ada di products,0,0.00%
+0-Baseline OLTP,orders.shipped_date,Dependency (tgl),kirim < pesan,0,0.00%

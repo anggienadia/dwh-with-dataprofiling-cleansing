@@ -2,7 +2,7 @@ import sys, os
 import pandas as pd
 
 STG = sys.argv[1] if len(sys.argv) > 1 else "order_transactions_dirty_1M.csv"
-OLTP = sys.argv[2] if len(sys.argv) > 2 else "."
+OLTP = sys.argv[2] if len(sys.argv) > 2 else "data/raw"
 
 def rd(name):  # semua dibaca sebagai string supaya format asli tidak berubah
     return pd.read_csv(os.path.join(OLTP, f"{name}.csv"), dtype=str, keep_default_na=False)
