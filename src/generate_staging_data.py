@@ -3,17 +3,28 @@ import numpy as np
 import random
 
 def generate_dirty_dataset():
-    print("Membaca dataset referensi asli...")
+    print("Membaca dataset referensi asli OLTP BikeStore...")
     orders = pd.read_csv('data/raw/orders.csv')
     order_items = pd.read_csv('data/raw/order_items.csv')
+    customers = pd.read_csv('data/raw/customers.csv')
+    products = pd.read_csv('data/raw/products.csv')
+    stores = pd.read_csv('data/raw/stores.csv')
+    staffs = pd.read_csv('data/raw/staffs.csv')
     
-    # Menggabungkan order_items dan orders sebagai tabel fakta utama
+    # Menggabungkan order_items dengan orders sebagai basis transaksi utama
+    print("Menggabungkan tabel orders dan order_items...")
     df_base = pd.merge(order_items, orders, on='order_id', how='left')
+    
+    # Pastikan juga mengambil atau mempertahankan kolom-kolom master terkait jika diperlukan,
+    # atau biarkan ter-merge secara utuh dari relasi orders ke customers/stores/staffs.
     
     # 1. DUPLIKASI DATA HINGGA 1 JUTA BARIS
     print("Menduplikasi data menjadi 1.000.000 baris dengan random sampling...")
     n_rows = 1_000_000
     df = df_base.sample(n=n_rows, replace=True, random_state=42).reset_index(drop=True)
+    
+    # Sesuaikan order_id agar unik seiring penambahan baris jika diperlukan, 
+    # atau biarkan merepresentasikan replika transaksi kotor.
     
     print("Menginjeksikan anomali untuk praktik data profiling...")
     
@@ -45,7 +56,6 @@ def generate_dirty_dataset():
     df.loc[mismatch_idx, 'shipped_date'] = '2000-01-01'
 
     # E. Uniqueness (Data Ganda)
-    # Menambahkan 5.000 duplikat baris identik ke dalam dataset
     print("Menambahkan baris duplikat untuk mengecek uniqueness...")
     duplicates = df.sample(n=5000, random_state=8)
     df = pd.concat([df, duplicates], ignore_index=True)
