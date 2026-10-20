@@ -11,14 +11,10 @@ def generate_dirty_dataset():
     stores = pd.read_csv('data/raw/stores.csv')
     staffs = pd.read_csv('data/raw/staffs.csv')
     
-    # Menggabungkan order_items dengan orders sebagai basis transaksi utama
+
     print("Menggabungkan tabel orders dan order_items...")
     df_base = pd.merge(order_items, orders, on='order_id', how='left')
     
-    # Pastikan juga mengambil atau mempertahankan kolom-kolom master terkait jika diperlukan,
-    # atau biarkan ter-merge secara utuh dari relasi orders ke customers/stores/staffs.
-    
-    # 1. DUPLIKASI DATA HINGGA 1 JUTA BARIS
     print("Menduplikasi data menjadi 1.000.000 baris dengan random sampling...")
     n_rows = 1_000_000
     df = df_base.sample(n=n_rows, replace=True, random_state=42).reset_index(drop=True)
