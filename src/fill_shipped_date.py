@@ -1,9 +1,14 @@
+import sys
 from pathlib import Path
 import csv
 
-project_dir = Path(__file__).resolve().parent.parent
-input_file = Path(r"C:\1.UNUD\Semester 3\Pangdat\dwh-with-dataprofiling-cleansing\data\staging_dirty\order_transactions_dirty_1M.csv")
-output_file = Path(r"C:\1.UNUD\Semester 3\Pangdat\dwh-with-dataprofiling-cleansing\data\staging_dirty\order_transactions_filled.csv")
+input_path = sys.argv[1] if len(sys.argv) > 1 else "data/staging_dirty/order_transactions_dirty_1M.csv"
+output_path = sys.argv[2] if len(sys.argv) > 2 else "data/staging_dirty/order_transactions_filled.csv"
+
+input_file = Path(input_path)
+output_file = Path(output_path)
+
+output_file.parent.mkdir(parents=True, exist_ok=True)
 
 filled_count = 0
 
