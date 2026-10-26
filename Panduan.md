@@ -21,71 +21,74 @@ Gunakan alur berikut:
 
 Job terjadwal boleh mengorkestrasi langkah cleansing → load dimension → load fact setelah setiap transformasi lolos pengujian. Profiling sebelum/sesudah cleansing harus tetap dapat dijalankan dan hasilnya disimpan. Jangan menjalankan load fact jika cleansing atau load dimension gagal.
 
-## 2. Apakah staging dirty harus digenerate ulang?
+## 2. Dataset dirty final dan generator
 
-**Rekomendasi: jangan menimpa file dirty yang sekarang terlebih dahulu.** Jadikan file yang sekarang sebagai arsip/baseline sementara, lalu audit generator dan sumbernya.
+Tujuan tugas adalah menguji **data profiling dan data cleansing pada dataset besar**. Dataset boleh sintetis; jangan mengklaim seluruh satu juta baris merupakan transaksi nyata dari OLTP.
 
-Dari pemeriksaan awal terhadap `src/generate_staging_data.py`, ada hal yang perlu dibenahi sebelum regenerasi:
-- Sampling dilakukan dengan `replace=True`; karena itu baris transaksi yang berulang dapat terjadi secara sengaja.
-- Script menambahkan 5.000 baris duplikat eksplisit setelah sampling 1.000.000 baris, sehingga total targetnya 1.005.000 baris, bukan tepat 1.000.000.
-- `random.choice()` tidak dikunci seed-nya, sehingga hasil format tanggal tidak sepenuhnya reproducible.
-- Output ditulis ke `order_transactions_dirty_1M.csv` di working directory, bukan secara eksplisit ke `data/staging_dirty/order_transactions_dirty_1M.csv`.
-- Ada kemungkinan file saat ini pernah diedit manual sehingga tidak identik dengan keluaran generator.
+Keputusan final:
+- Generator menghasilkan **tepat 1.000.000 baris total**, termasuk anomali dan duplikasi yang sengaja diinjeksi.
+- Output utama: `data/staging_dirty/order_transactions_dirty.csv` (tanpa suffix `_1M`).
+- Semua random memakai seed tetap; dua run dengan seed/konfigurasi sama harus menghasilkan file identik.
+- Tidak menggunakan `sample_id`.
+- Jangan memakai sampling dengan replacement sebagai cara utama memperbanyak transaksi, karena transaksi yang berulang bisa membuat omzet terhitung berulang dan menyulitkan definisi grain.
+- Pertahankan transaksi OLTP asli yang unik, lalu buat item/order sintetis tambahan dengan ID yang tidak bentrok dan relasi header-detail yang konsisten. Dataset sintetis harus jelas didokumentasikan sebagai data simulasi.
+- Simpan referensi sintetis yang diperlukan untuk memulihkan nilai di `data/staging_dirty/` dengan nama terpisah dan jelas, misalnya file referensi order/item sintetis. Jangan mengubah `data/raw/`.
+- Buat sejumlah duplikat persis yang disengaja dan terdokumentasi untuk menguji deduplikasi. Target awal 1% (10.000 baris) boleh dipakai kecuali generator lama menunjukkan alasan kuat untuk angka lain; laporkan angka final.
+- Buat sejumlah kecil pelanggaran integritas referensial yang disengaja untuk menguji pemeriksaan foreign key. Karena referensi buku membahas *Referential Integrity Checking*, dokumentasikan ini sebagai **pelanggaran integritas referensial**; tidak perlu memakai istilah bisnis “orphan order”. Baris uji harus memakai key yang tidak ada pada OLTP maupun referensi sintetis. Target awal 0,1% (1.000 baris) boleh dipakai dan harus masuk reject setelah cleansing.
+- Jumlah baris dan kategori harus dirancang agar 1.000.000 adalah jumlah total akhir, bukan jumlah dasar ditambah anomali.
 
-Urutan yang benar:
-1. Audit generator dan dataset saat ini; jangan menimpa file saat audit.
-2. Putuskan target jumlah baris secara eksplisit. Untuk menjaga kompatibilitas nama dataset, rekomendasi default adalah **tepat 1.000.000 baris total termasuk anomali dan duplikasi**. Jika 5.000 duplikat eksplisit dipertahankan, jumlah baris sampling dasar harus disesuaikan menjadi 995.000. Catat keputusan ini di dokumentasi.
-3. Perbaiki generator agar output path eksplisit, seed semua random generator, dan hasil dapat direproduksi.
-4. Arsipkan salinan dataset dirty saat ini di luar jalur input aktif, tanpa menghapusnya.
-5. Jalankan generator yang sudah diperbaiki satu kali untuk membuat baseline dirty baru. Jalankan profiling pada baseline tersebut.
-6. Setelah baseline disetujui, jangan mengedit CSV dirty secara manual. Perubahan harus melalui generator dengan seed/versi yang tercatat.
+Sebelum mengganti file aktif:
+1. Audit generator, skema CSV, tabel OLTP, dan seluruh referensi yang dipakai.
+2. Bangun output sementara, verifikasi tepat 1.000.000 baris, validasi seed/reproducibility, dan pastikan tidak ada baris tambahan karena edit manual.
+3. Arsipkan file dirty lama; jangan hapus.
+4. Setelah tes sementara lulus, pindahkan hasil ke `data/staging_dirty/order_transactions_dirty.csv` dan gunakan file itu sebagai baseline tetap.
+5. Jangan edit CSV dirty manual. Semua perubahan harus melalui generator dan seed/konfigurasi yang tercatat.
 
-Jangan regenerasi berulang kali selama mengembangkan cleansing; gunakan satu baseline dirty yang tetap agar hasil antar-run dapat dibandingkan. Regenerasi baru hanya dilakukan jika generator atau spesifikasi dataset berubah dan perubahan itu memang disengaja.
+## 3. Aturan sumber, tanggal, dan pemulihan
 
-## 3. Aturan tanggal dan pemulihan staging dari OLTP
+Cleansing dilakukan pada staging dengan merujuk ke OLTP asli dan referensi sintetis yang dihasilkan secara eksplisit. **Jangan menulis perubahan ke file sumber OLTP di `data/raw/`.** Untuk transaksi sintetis, referensi sintetis yang konsisten adalah sumber kebenaran bagi baris sintetis tersebut.
 
-Pemulihan dilakukan di proses cleansing staging dengan mencocokkan baris ke data OLTP. **Jangan menulis perubahan ke file OLTP sumber.**
+### Audit sumber dan status order
+- Sebelum menulis aturan, periksa kolom dan nilai aktual di file OLTP. Jangan mengarang kolom status, kode status, label status, atau arti kode.
+- Jika OLTP memang memiliki kolom status, gunakan hanya nilai yang benar-benar ada. Cari definisi status di skema/dokumentasi/kode proyek. Jika makna kode tidak terdokumentasi, laporkan nilai yang ditemukan dan jangan menyimpulkan labelnya sendiri.
+- Jangan menambahkan status bisnis baru ke OLTP atau ke kolom status order. Status kualitas data seperti `recovered` atau `rejected`, jika dibutuhkan, dicatat di laporan/metadata proses, bukan sebagai status order baru.
 
 ### Kunci pencocokan
-- Gunakan `order_id` untuk mengambil atribut header order, termasuk `order_date`, `required_date`, dan `shipped_date`, dari `data/raw/orders.csv`.
-- Gunakan kunci bisnis transaksi/item yang sesuai untuk mencocokkan detail order. Pastikan grain data dan struktur CSV dipahami sebelum join.
-- Bila satu kunci menghasilkan lebih dari satu kandidat sumber yang bertentangan, jangan memilih secara acak. Masukkan baris ke reject dengan alasan ambigu.
+- Gunakan `order_id` untuk mengambil atribut header seperti `order_date`, `required_date`, dan `shipped_date` dari sumber order yang sesuai.
+- Gunakan kunci detail yang benar setelah memeriksa skema dan grain aktual. Jangan mengasumsikan nama kolom/kunci tanpa audit.
+- Untuk data sintetis, lookup harus mengacu ke referensi sintetis yang dibuat generator. Jika key tidak ditemukan di OLTP maupun referensi sintetis, perlakukan sebagai pelanggaran integritas referensial dan reject.
+- Jika satu kunci menghasilkan kandidat sumber yang bertentangan atau ambigu, jangan memilih secara acak; reject dengan alasan eksplisit.
 
-### `order_date`
-- Normalisasikan format tanggal yang valid ke format baku yang konsisten.
-- Jika NULL/kosong, sentinel, atau tidak valid, coba pulihkan dari OLTP berdasarkan kunci yang valid.
-- Jika sumber OLTP juga NULL/tidak tersedia atau pencocokan ambigu, baris **tidak boleh masuk DWH**; masukkan ke reject dengan alasan eksplisit.
-
-### `required_date`
-- Terapkan aturan yang sama seperti `order_date`.
-- Jangan mengisi dari `order_date` atau tanggal lain hanya untuk menghilangkan NULL.
+### `order_date` dan `required_date`
+- Normalisasikan tanggal valid ke format baku yang konsisten.
+- Jika kosong/NULL, sentinel (termasuk `1900-01-01` atau `2000-01-01`), atau tidak valid, pulihkan hanya dari sumber yang cocok dan valid.
+- Jangan mengisi tanggal dengan tanggal lain hanya untuk menghilangkan NULL.
+- Jika nilai wajib tidak dapat dipulihkan secara meyakinkan, masukkan baris ke reject, bukan DWH.
 
 ### `shipped_date`
-- Normalisasikan format tanggal yang valid.
-- Jika NULL/kosong atau sentinel seperti `1900-01-01`/`2000-01-01`, cek status order dan nilai pada OLTP.
-- Jika OLTP memiliki `shipped_date` valid dan order cocok secara meyakinkan, pulihkan dari OLTP.
-- Jika OLTP menunjukkan order belum dikirim dan `shipped_date` memang NULL, pertahankan NULL di staging clean. Ini adalah kondisi bisnis yang valid, bukan otomatis error.
-- Jika OLTP menunjukkan order sudah dikirim tetapi tanggal sumber juga NULL/tidak valid, atau status/tanggal bertentangan dan tidak bisa diselesaikan dengan aturan yang disepakati, masukkan ke reject.
-- **Jangan pernah mengisi `shipped_date` menggunakan `required_date`.** Kedua kolom memiliki makna berbeda.
+- Jangan menggunakan `required_date` sebagai pengganti `shipped_date`.
+- Jika staging kosong/NULL atau berisi sentinel/tanggal tidak valid, cocokkan dengan OLTP atau referensi sintetis yang sesuai.
+- Jika sumber yang sesuai memiliki `shipped_date` valid, pulihkan nilai tersebut.
+- Jika sumber yang sesuai juga NULL, pertahankan NULL hanya bila data sumber/aturan yang terdokumentasi menyatakan bahwa NULL itu sah. Jangan menganggap semua NULL sebagai kesalahan dan jangan menganggap semua NULL sah tanpa pemeriksaan.
+- Jika sumber tidak bisa menentukan apakah tanggal seharusnya ada, jangan mengarang tanggal atau status. Tandai sebagai tidak dapat dipastikan; berdasarkan aturan dataset ini, reject dari output clean/DWH dan catat alasannya.
+- Gunakan status order hanya jika kolom dan makna status telah diverifikasi dari sumber/dokumentasi. Jangan menebak bahwa angka tertentu berarti “belum dikirim” atau “selesai”.
 
-### Aturan masuk DWH untuk tanggal
-- Baris hanya boleh masuk DWH jika seluruh kolom wajib untuk grain/fact yang disepakati valid dan relasi kunci yang diperlukan valid.
-- NULL pada `shipped_date` boleh dipertahankan untuk order yang belum dikirim, asalkan model DWH mendukungnya. Jangan mengganti NULL dengan tanggal buatan atau tanggal sentinel.
-- Jika `order_date` atau `required_date` wajib untuk model DWH dan tidak dapat dipulihkan dari OLTP, tolak baris dari DWH dan catat alasannya.
-- Reject harus disimpan sebagai output terpisah, misalnya `data/reject/order_transactions_rejected.csv`, dengan kolom sumber plus `reject_reason` dan/atau `reject_stage`. Nama final boleh disesuaikan dengan konvensi repo, tetapi harus konsisten.
+### Prinsip masuk DWH
+- Baris clean hanya berisi data yang lolos validasi dan aturan integritas yang disepakati.
+- NULL `shipped_date` boleh dipertahankan jika terbukti merupakan NULL yang sah menurut sumber. Jika model fact/dashboard mendukungnya, status “belum dikirim” boleh ditampilkan sebagai interpretasi analitis, tetapi jangan menciptakan status order baru di OLTP.
+- Baris yang tanggal wajibnya tidak bisa dipulihkan, relasinya tidak valid, atau anomali pentingnya tidak bisa diselesaikan masuk reject dengan alasan yang jelas.
+- Simpan reject terpisah, misalnya `data/reject/order_transactions_rejected.csv`, dengan seluruh kolom input dan `reject_reason`/`reject_stage`. Nama final harus konsisten dengan repo.
 
-## 4. Grain, duplikasi, dan jumlah baris
+## 4. Grain, duplikasi, dan integritas referensial
 
-Generator menggunakan sampling dengan replacement. Artinya, kemunculan order/item yang sama belum tentu merupakan kesalahan: itu dapat menjadi bagian dari desain dataset simulasi.
+Grain final untuk dataset transaksi adalah **satu baris per item transaksi** dengan pasangan bisnis yang unik untuk setiap transaksi valid. Data sintetis harus diberi ID order/item baru agar tidak berbenturan dengan data asli; jangan menggunakan `sample_id`.
 
-Sebelum membuat aturan deduplikasi:
-1. Tetapkan grain dataset yang sebenarnya.
-2. Identifikasi duplikat yang sengaja diinjeksi generator secara terpisah dari duplikat akibat sampling dengan replacement.
-3. Jangan menghapus semua baris dengan kombinasi `(order_id, item_id)` yang sama secara otomatis apabila sampling memang mengulang transaksi tersebut.
-4. Jika tujuan tugas mengharuskan satu baris per item order unik, ubah strategi pembentukan dataset atau tambahkan identitas replika/sampel agar jumlah observasi tidak hilang diam-diam. Dokumentasikan keputusan.
-5. Setiap baris yang dihapus atau ditolak harus dapat dihitung dan dijelaskan.
-
-Jangan membuat asumsi bahwa 1.000.000 baris staging akan menjadi 1.000.000 baris clean. Jumlah clean ditentukan aturan validasi dan model data, lalu direkonsiliasi dengan jumlah reject dan baris yang dieliminasi sesuai aturan eksplisit.
+- Buat order sintetis dan detailnya secara konsisten; `order_id` detail harus ada pada sumber order asli atau referensi order sintetis, kecuali baris yang sengaja dibuat sebagai pelanggaran integritas referensial.
+- Duplikat yang sengaja diinjeksi harus berupa salinan persis yang dapat dikenali dan dihitung. Dedup hanya menghapus duplikat yang didefinisikan generator sebagai duplikat uji; jangan menghapus semua baris dengan `order_id` sama karena satu order memang dapat memiliki beberapa item.
+- Periksa keunikan grain setelah cleansing dan jelaskan aturan kunci bisnis yang digunakan.
+- Buku *Data Warehouse: Teori dan Praktek*, Bab 10.3.5, membahas **Referential Integrity Checking** (halaman cetak 223 / halaman PDF 232): hubungan antar tabel melalui foreign key harus dijaga. Karena itu, uji pelanggaran referensial boleh digunakan sebagai anomali data-quality yang disengaja. Jangan menyebutnya sebagai status bisnis; gunakan istilah “pelanggaran integritas referensial”.
+- Rekonsiliasi kategori tanpa tumpang tindih: `input = clean + reject + exact_duplicates_eliminated` (atau kategori lain yang memang terpisah dan didefinisikan). Pastikan satu baris tidak dihitung pada dua kategori sekaligus.
+- Jangan menganggap semua baris staging akan menjadi clean. Jelaskan jumlah dan alasan perbedaan.
 
 ## 5. Profiling
 
@@ -144,7 +147,7 @@ Dashboard dikerjakan setelah cleansing, load dimension, dan load fact tervalidas
 
 ### Pertahankan
 - Semua sumber OLTP di `data/raw/`.
-- `data/staging_dirty/order_transactions_dirty_1M.csv` yang ada sampai audit dan arsip selesai.
+- `data/staging_dirty/order_transactions_dirty.csv` setelah generator baru lolos uji; arsipkan dataset lama terlebih dahulu.
 - Dataset lama `data/staging_dirty/order_transactions_dirty_1M-lama12okt.csv` sebagai arsip bila masih berguna.
 - Laporan profiling lama sebagai catatan historis, tetapi jangan menyebutnya hasil dari dataset baru.
 
@@ -153,7 +156,7 @@ Dashboard dikerjakan setelah cleansing, load dimension, dan load fact tervalidas
 - Kedua file clean lama tidak boleh dianggap output valid terbaru. Setelah Pentaho diperbaiki, buat ulang ke satu nama output resmi; arsipkan atau hapus salinan lama setelah memastikan tidak ada kebutuhan pembandingan.
 
 ### Buat ulang setelah kode disetujui
-- Baseline `order_transactions_dirty_1M.csv`, hanya setelah generator diperbaiki dan dataset lama diarsipkan.
+- Baseline `order_transactions_dirty.csv`, hanya setelah generator diperbaiki dan dataset lama diarsipkan.
 - Laporan profiling baseline untuk dataset dirty yang baru.
 - Output clean dan reject dari cleansing terbaru.
 - Dimensi dan fact DWH sesuai strategi refresh yang ditetapkan.
@@ -181,9 +184,11 @@ Jangan mengimplementasikan semua tahap sekaligus. Pada akhir setiap tahap, tampi
 ## 10. Kriteria penerimaan
 
 Project belum dianggap selesai sampai:
-- Generator menghasilkan jumlah baris yang ditentukan dan dapat direproduksi dengan seed yang sama.
+- Generator menghasilkan tepat 1.000.000 baris total dan dapat direproduksi dengan seed yang sama.
+- Tidak ada `sample_id`; data sintetis ditandai/didokumentasikan dan memakai key unik.
+- Kode/label status order tidak dikarang; hanya memakai kolom dan definisi yang terverifikasi dari sumber.
 - Sumber OLTP tidak berubah.
-- Cleansing tidak lagi membaca `order_transactions_filled.csv`.
+- Cleansing membaca `data/staging_dirty/order_transactions_dirty.csv` secara langsung, bukan `order_transactions_filled.csv`.
 - Tidak ada pengisian `shipped_date` dari `required_date`.
 - Tanggal bermasalah dipulihkan hanya bila ada sumber yang cocok dan valid; nilai yang tidak dapat dipulihkan masuk reject, bukan dipaksakan masuk DWH.
 - NULL `shipped_date` yang sah untuk order belum dikirim tetap NULL.
@@ -196,4 +201,4 @@ Project belum dianggap selesai sampai:
 
 ## Instruksi terakhir untuk Claude
 
-Mulai dari **Tahap 1: audit repository saja**. Jangan menulis atau menghapus file sampai laporan audit dan daftar perubahan diajukan. Jika ada konflik antara kode lama dan panduan ini, ikuti panduan ini dan jelaskan konflik tersebut. Jangan mengubah aturan bisnis atau skema DWH tanpa melaporkan dampaknya terlebih dahulu.
+Mulai dari audit generator dan sumber, lalu implementasikan tahap 1–6 saja: generator 1.000.000 baris, profiling baseline, cleansing, profiling ulang, rekonsiliasi, dan verifikasi independen. Jangan lanjut mengubah Pentaho atau dashboard sampai hasil tahap 1–6 dilaporkan dan disetujui. Uji generator pada file sementara sebelum mengganti baseline. Jangan menghapus file lama; arsipkan dan laporkan kandidat penghapusan terlebih dahulu. Jika ada konflik antara kode lama dan panduan ini, ikuti panduan ini dan jelaskan konflik tersebut. Jangan mengubah aturan bisnis atau skema DWH tanpa melaporkan dampaknya terlebih dahulu.
